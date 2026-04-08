@@ -64,6 +64,36 @@ int tls13_enc(SSL *s, SSL3_RECORD *recs, size_t n_recs, int sending)
         return 1;
     }
 
+#ifdef KLEE
+    {
+        extern void klee_make_symbolic(void *, size_t, const char *);
+        extern void klee_warning(const char *);
+        /*
+         * Skip real AES-GCM crypto. For decryption: fill rec->data with
+         * symbolic data (simulating decrypted plaintext). For encryption:
+         * just copy input to output (the ciphertext doesn't matter for KLEE).
+         */
+        if (!sending) {
+            klee_warning("tls13_enc: symbolic decrypt (skip AES-GCM)");
+            /* Remove tag from length like real code does */
+            taglen = EVP_GCM_TLS_TAG_LEN;
+            if (rec->length < taglen + 1)
+                return 0;
+            rec->length -= taglen;
+            /* Fill with symbolic plaintext */
+            void *sym = malloc(rec->length);
+            if (!sym) return -1;
+            klee_make_symbolic(sym, rec->length, "decrypted");
+            memcpy(rec->data, sym, rec->length);
+            free(sym);
+        } else {
+            klee_warning("tls13_enc: symbolic encrypt (skip AES-GCM)");
+            memmove(rec->data, rec->input, rec->length);
+        }
+        return 1;
+    }
+#endif
+
     ivlen = EVP_CIPHER_CTX_iv_length(ctx);
 
     if (s->early_data_state == SSL_EARLY_DATA_WRITING

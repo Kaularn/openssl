@@ -170,7 +170,11 @@ extern "C" {
  * an application-defined cipher list string starts with 'DEFAULT'.
  * This applies to ciphersuites for TLSv1.2 and below.
  */
-# define SSL_DEFAULT_CIPHER_LIST "ALL:!COMPLEMENTOFDEFAULT:!eNULL"
+# ifdef KLEE
+#  define SSL_DEFAULT_CIPHER_LIST "AES128-GCM-SHA256"
+# else
+#  define SSL_DEFAULT_CIPHER_LIST "ALL:!COMPLEMENTOFDEFAULT:!eNULL"
+# endif
 /* This is the default set of TLSv1.3 ciphersuites */
 # if !defined(OPENSSL_NO_CHACHA) && !defined(OPENSSL_NO_POLY1305)
 #  define TLS_DEFAULT_CIPHERSUITES "TLS_AES_256_GCM_SHA384:" \

@@ -281,7 +281,9 @@ int ssl3_read_n(SSL *s, size_t n, size_t max, int extend, int clearold,
         return -1;
     }
 
-    /* We always act like read_ahead is set for DTLS */
+#ifdef KLEE
+    max = n;  /* Under KLEE: läs bara exakt vad som behövs */
+#else
     if (!s->rlayer.read_ahead && !SSL_IS_DTLS(s))
         /* ignore max parameter */
         max = n;
@@ -291,8 +293,12 @@ int ssl3_read_n(SSL *s, size_t n, size_t max, int extend, int clearold,
         if (max > rb->len - rb->offset)
             max = rb->len - rb->offset;
     }
+#endif
 
+    #ifndef KLEE
     while (left < n) {
+    #endif
+    {
         size_t bioread = 0;
         int ret;
 
@@ -333,6 +339,17 @@ int ssl3_read_n(SSL *s, size_t n, size_t max, int extend, int clearold,
                 n = left;       /* makes the while condition false */
         }
     }
+#ifdef KLEE
+    /* Under KLEE: om vi inte fick tillräckligt data på en läsning,
+     * avbryt denna sökväg. Precis som wolfSSL — vi kräver att
+     * hela meddelandet läses i ett svep. */
+    if (left < n) {
+        extern void klee_silent_exit(int);
+        klee_silent_exit(0);
+    }
+#else
+    }
+#endif
 
     /* done reading, now the book-keeping */
     rb->offset += n;
@@ -1451,6 +1468,10 @@ int ssl3_read_bytes(SSL *s, int type, int *recvd_type, unsigned char *buf,
         } while (type == SSL3_RT_APPLICATION_DATA && curr_rec < num_recs
                  && totalbytes < len);
         if (totalbytes == 0) {
+#ifdef KLEE
+            /* Under KLEE: avbryt istället för att loopa på tomma records */
+            return -1;
+#endif
             /* We must have read empty records. Get more data */
             goto start;
         }

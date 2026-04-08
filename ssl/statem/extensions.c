@@ -586,13 +586,31 @@ int tls_collect_extensions(SSL *s, PACKET *packet, unsigned int context,
         unsigned int type, idx;
         PACKET extension;
         RAW_EXTENSION *thisex;
-
+#ifdef KLEE
+        fprintf(stderr, "  [PARSE] extensions: about to read type+ext (remaining=%zu)\n", PACKET_remaining(&extensions));
+#endif
         if (!PACKET_get_net_2(&extensions, &type) ||
             !PACKET_get_length_prefixed_2(&extensions, &extension)) {
+#ifdef KLEE
+            fprintf(stderr, "  [PARSE] extensions: bad extension format, exiting\n");
+            { extern void klee_silent_exit(int); klee_silent_exit(0); }
+#endif
             SSLfatal(s, SSL_AD_DECODE_ERROR, SSL_F_TLS_COLLECT_EXTENSIONS,
                      SSL_R_BAD_EXTENSION);
             goto err;
         }
+#ifdef KLEE
+        /* Only allow supported_versions and key_share in ServerHello.
+         * All other extension types cause state explosion. */
+        if ((context & (SSL_EXT_TLS1_3_SERVER_HELLO | SSL_EXT_TLS1_2_SERVER_HELLO)) != 0) {
+            extern void klee_silent_exit(int);
+            if (type != 0x002B && type != 0x0033) {
+                fprintf(stderr, "  [PARSE] extensions: unwanted type 0x%04x, silent exit\n", type);
+                klee_silent_exit(0);
+            }
+            fprintf(stderr, "  [PARSE] extensions: type=0x%04x OK context=0x%04x\n", type, context);
+        }
+#endif
         /*
          * Verify this extension is allowed. We only check duplicates for
          * extensions that we recognise. We also have a special case for the

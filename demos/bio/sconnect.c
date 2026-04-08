@@ -19,6 +19,8 @@
 #include <unistd.h>
 #include <string.h>
 #include <errno.h>
+#include <sys/socket.h>
+#include <arpa/inet.h>
 #include <openssl/err.h>
 #include <openssl/ssl.h>
 
@@ -54,13 +56,31 @@ int main(int argc, char *argv[])
 
     ssl_ctx = SSL_CTX_new(TLS_client_method());
 
+#ifdef KLEE
+    /* Force TLS 1.3 only */
+    SSL_CTX_set_min_proto_version(ssl_ctx, TLS1_3_VERSION);
+    SSL_CTX_set_max_proto_version(ssl_ctx, TLS1_3_VERSION);
+    /* AES-128-GCM-SHA256 only */
+    SSL_CTX_set_ciphersuites(ssl_ctx, "TLS_AES_128_GCM_SHA256");
+    /* No cert verification under KLEE */
+    SSL_CTX_set_verify(ssl_ctx, SSL_VERIFY_NONE, NULL);
+    /* Disable middlebox compatibility mode — wolfSSL doesn't use it either.
+     * This removes the session ID echo check that would kill every path. */
+    SSL_CTX_clear_options(ssl_ctx, SSL_OP_ENABLE_MIDDLEBOX_COMPAT);
+#else
     /* Enable trust chain verification */
     SSL_CTX_set_verify(ssl_ctx, SSL_VERIFY_PEER, NULL);
     SSL_CTX_load_verify_locations(ssl_ctx, CAfile, NULL);
+#endif
 
     /* Lets make a SSL structure */
     ssl = SSL_new(ssl_ctx);
     SSL_set_connect_state(ssl);
+#if 0
+    /* Disabled: SSL_trace with symbolic data causes state explosion in KLEE */
+    SSL_set_msg_callback(ssl, SSL_trace);
+    SSL_set_msg_callback_arg(ssl, BIO_new_fp(stderr, BIO_NOCLOSE));
+#endif
 
     /* Enable peername verification */
     if (SSL_set1_host(ssl, hostname) <= 0)

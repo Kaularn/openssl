@@ -270,9 +270,31 @@ int ssl3_get_record(SSL *s)
                     SSLfatal(s, SSL_AD_DECODE_ERROR, SSL_F_SSL3_GET_RECORD,
                              ERR_R_INTERNAL_ERROR);
                     return -1;
-                }
-                thisrr->type = type;
-                thisrr->rec_version = version;
+        }
+#ifdef KLEE
+        {
+            extern void klee_assume(int);
+            extern void klee_make_symbolic(void *addr, size_t nbytes, const char *name);
+            extern unsigned klee_is_symbolic(uintptr_t n);
+            /* Quick sanity test: create a symbolic int, assume > 10, print */
+            int test_val = 0;
+            klee_make_symbolic(&test_val, sizeof(test_val), "klee_test");
+            klee_assume(test_val > 10);
+            klee_assume(test_val < 20);
+            fprintf(stderr, "DEBUG: KLEE TEST: test_val=%d is_symbolic=%u\n",
+                            test_val, klee_is_symbolic(test_val));
+            fprintf(stderr, "DEBUG: KLEE TEST: thisrr->length=%zu is_symbolic=%u\n",
+                            thisrr->length, klee_is_symbolic(thisrr->length));
+            /* Now the real constraints */
+            type = SSL3_RT_HANDSHAKE;
+            version = TLS1_VERSION;
+            klee_assume(thisrr->length > 4);
+            fprintf(stderr, "DEBUG: ssl3_get_record KLEE: type=%d version=0x%04x length=%zu\n",
+                            type, version, thisrr->length);
+        }
+#endif
+        thisrr->type = type;
+        thisrr->rec_version = version;
 
                 /*
                  * Lets check version. In TLSv1.3 we only check this field
@@ -404,6 +426,9 @@ int ssl3_get_record(SSL *s)
         } else {
             more = thisrr->length;
         }
+#ifdef KLEE
+        fprintf(stderr, "DEBUG: before ssl3_read_n body: more=%zu thisrr->length=%zu\n", more, thisrr->length);
+#endif
         if (more > 0) {
             /* now s->rlayer.packet_length == SSL3_RT_HEADER_LENGTH */
 
@@ -443,6 +468,14 @@ int ssl3_get_record(SSL *s)
 
         /* decrypt in place in 'thisrr->input' */
         thisrr->data = thisrr->input;
+#ifdef KLEE
+        /* All record body bytes are symbolic from the network.
+         * Middlebox compat is disabled so no session ID echo needed.
+         * msg_type is constrained by klee_assume in socket stub (byte 5)
+         * and in tls_get_message_header. */
+        fprintf(stderr, "DEBUG: KLEE record body is fully symbolic, length=%zu\n",
+                        thisrr->length);
+#endif
         thisrr->orig_len = thisrr->length;
 
         /* Mark this record as not read by upper layers yet */

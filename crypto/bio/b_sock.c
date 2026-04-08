@@ -160,6 +160,9 @@ void bio_sock_cleanup_int(void)
 
 int BIO_socket_ioctl(int fd, long type, void *arg)
 {
+#ifdef KLEE
+    return 0;
+#endif
     int i;
 
 #  ifdef __DJGPP__
@@ -295,6 +298,9 @@ int BIO_set_tcp_ndelay(int s, int on)
 
 int BIO_socket_nbio(int s, int mode)
 {
+#ifdef KLEE
+    return 1;
+#endif
     int ret = -1;
     int l;
 

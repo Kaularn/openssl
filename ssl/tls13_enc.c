@@ -88,6 +88,22 @@ int tls13_hkdf_expand(SSL *s, const EVP_MD *md, const unsigned char *secret,
         return 0;
     }
 
+    fprintf(stderr, "  [CRYPTO] HKDF-Expand  label=\"%.*s\"  outlen=%zu\n",
+            (int)labellen, label, outlen);
+
+#ifdef KLEE
+    /* Return symbolic derived key material instead of real HKDF */
+    {
+        extern void klee_make_symbolic(void *, size_t, const char *);
+        void *sym = malloc(outlen);
+        if (!sym) return 0;
+        klee_make_symbolic(sym, outlen, "hkdf_expand");
+        memcpy(out, sym, outlen);
+        free(sym);
+    }
+    EVP_PKEY_CTX_free(pctx);
+    return 1;
+#else
     ret = EVP_PKEY_derive_init(pctx) <= 0
             || EVP_PKEY_CTX_hkdf_mode(pctx, EVP_PKEY_HKDEF_MODE_EXPAND_ONLY)
                <= 0
@@ -107,6 +123,7 @@ int tls13_hkdf_expand(SSL *s, const EVP_MD *md, const unsigned char *secret,
     }
 
     return ret == 0;
+#endif
 }
 
 /*
@@ -122,6 +139,7 @@ int tls13_derive_key(SSL *s, const EVP_MD *md, const unsigned char *secret,
   static const unsigned char keylabel[] = "key";
 #endif
 
+    fprintf(stderr, "  [CRYPTO] derive_key (AES key)  keylen=%zu\n", keylen);
     return tls13_hkdf_expand(s, md, secret, keylabel, sizeof(keylabel) - 1,
                              NULL, 0, key, keylen, 1);
 }
@@ -139,6 +157,7 @@ int tls13_derive_iv(SSL *s, const EVP_MD *md, const unsigned char *secret,
   static const unsigned char ivlabel[] = "iv";
 #endif
 
+    fprintf(stderr, "  [CRYPTO] derive_iv (AES-GCM IV)  ivlen=%zu\n", ivlen);
     return tls13_hkdf_expand(s, md, secret, ivlabel, sizeof(ivlabel) - 1,
                              NULL, 0, iv, ivlen, 1);
 }
@@ -153,6 +172,7 @@ int tls13_derive_finishedkey(SSL *s, const EVP_MD *md,
   static const unsigned char finishedlabel[] = "finished";
 #endif
 
+    fprintf(stderr, "  [CRYPTO] derive_finishedkey (HMAC key for Finished)  len=%zu\n", finlen);
     return tls13_hkdf_expand(s, md, secret, finishedlabel,
                              sizeof(finishedlabel) - 1, NULL, 0, fin, finlen, 1);
 }
@@ -168,6 +188,22 @@ int tls13_generate_secret(SSL *s, const EVP_MD *md,
                           size_t insecretlen,
                           unsigned char *outsecret)
 {
+    fprintf(stderr, "  [CRYPTO] tls13_generate_secret (HKDF-Extract)  insecretlen=%zu  prevsecret=%s\n",
+            insecretlen, prevsecret ? "yes" : "NULL(zeros)");
+
+#ifdef KLEE
+    /* Return symbolic secret instead of real HKDF-Extract */
+    {
+        size_t hashlen = EVP_MD_size(md);
+        extern void klee_make_symbolic(void *, size_t, const char *);
+        void *sym = malloc(hashlen);
+        if (!sym) return 0;
+        klee_make_symbolic(sym, hashlen, "hkdf_extract");
+        memcpy(outsecret, sym, hashlen);
+        free(sym);
+    }
+    return 1;
+#endif
     size_t mdlen, prevsecretlen;
     int mdleni;
     int ret;
@@ -260,6 +296,7 @@ int tls13_generate_secret(SSL *s, const EVP_MD *md,
 int tls13_generate_handshake_secret(SSL *s, const unsigned char *insecret,
                                 size_t insecretlen)
 {
+    fprintf(stderr, "  [CRYPTO] generate_handshake_secret (HKDF-Extract from DH shared secret)\n");
     /* Calls SSLfatal() if required */
     return tls13_generate_secret(s, ssl_handshake_md(s), s->early_secret,
                                  insecret, insecretlen,
@@ -277,6 +314,7 @@ int tls13_generate_master_secret(SSL *s, unsigned char *out,
 {
     const EVP_MD *md = ssl_handshake_md(s);
 
+    fprintf(stderr, "  [CRYPTO] generate_master_secret (HKDF-Extract)\n");
     *secret_size = EVP_MD_size(md);
     /* Calls SSLfatal() if required */
     return tls13_generate_secret(s, md, prev, NULL, 0, out);
@@ -289,6 +327,7 @@ int tls13_generate_master_secret(SSL *s, unsigned char *out,
 size_t tls13_final_finish_mac(SSL *s, const char *str, size_t slen,
                              unsigned char *out)
 {
+    fprintf(stderr, "  [CRYPTO] tls13_final_finish_mac (HMAC for Finished msg)\n");
     const EVP_MD *md = ssl_handshake_md(s);
     unsigned char hash[EVP_MAX_MD_SIZE];
     size_t hashlen, ret = 0;
@@ -342,6 +381,7 @@ size_t tls13_final_finish_mac(SSL *s, const char *str, size_t slen,
  */
 int tls13_setup_key_block(SSL *s)
 {
+    fprintf(stderr, "  [CRYPTO] tls13_setup_key_block (init cipher+hash for session)\n");
     const EVP_CIPHER *c;
     const EVP_MD *hash;
 
@@ -419,11 +459,20 @@ static int derive_secret_key_and_iv(SSL *s, int sending, const EVP_MD *md,
         goto err;
     }
 
+    fprintf(stderr, "  [CRYPTO] AES-GCM CipherInit  keylen=%zu ivlen=%zu taglen=%zu sending=%d\n",
+            keylen, ivlen, taglen, sending);
+#ifdef KLEE
+    /* Stub: pretend AES-GCM engine init succeeded with symbolic keys.
+     * We already stubbed tls13_enc() so the engine is never actually used. */
+    fprintf(stderr, "  [CRYPTO] KLEE: AES-GCM CipherInit stubbed (symbolic keys, no real crypto)\n");
+    if (0) {
+#else
     if (EVP_CipherInit_ex(ciph_ctx, ciph, NULL, NULL, NULL, sending) <= 0
         || !EVP_CIPHER_CTX_ctrl(ciph_ctx, EVP_CTRL_AEAD_SET_IVLEN, ivlen, NULL)
         || (taglen != 0 && !EVP_CIPHER_CTX_ctrl(ciph_ctx, EVP_CTRL_AEAD_SET_TAG,
                                                 taglen, NULL))
         || EVP_CipherInit_ex(ciph_ctx, NULL, NULL, key, NULL, -1) <= 0) {
+#endif
         SSLfatal(s, SSL_AD_INTERNAL_ERROR, SSL_F_DERIVE_SECRET_KEY_AND_IV,
                  ERR_R_EVP_LIB);
         goto err;
@@ -470,6 +519,14 @@ int tls13_change_cipher_state(SSL *s, int which)
     int ret = 0;
     const EVP_MD *md = NULL;
     const EVP_CIPHER *cipher = NULL;
+
+    fprintf(stderr, "  [CRYPTO] === tls13_change_cipher_state === which=0x%x (%s %s %s)\n",
+            which,
+            (which & SSL3_CC_READ) ? "READ" : "WRITE",
+            (which & SSL3_CC_CLIENT) ? "CLIENT" : "SERVER",
+            (which & SSL3_CC_HANDSHAKE) ? "HANDSHAKE" :
+            (which & SSL3_CC_APPLICATION) ? "APPLICATION" :
+            (which & SSL3_CC_EARLY) ? "EARLY" : "?");
 
     if (which & SSL3_CC_READ) {
         if (s->enc_read_ctx != NULL) {

@@ -297,7 +297,7 @@ char *BIO_ADDR_path_string(const BIO_ADDR *ap)
 /*
  * BIO_ADDR_sockaddr - non-public routine to return the struct sockaddr
  * for a given BIO_ADDR.  In reality, this is simply a type safe cast.
- * The returned struct sockaddr is const, so it can't be tampered with.
+#ifdef KLEE
  */
 const struct sockaddr *BIO_ADDR_sockaddr(const BIO_ADDR *ap)
 {
@@ -419,7 +419,11 @@ void BIO_ADDRINFO_free(BIO_ADDRINFO *bai)
 {
     if (bai == NULL)
         return;
-
+#ifdef KLEE
+    /* Under KLEE returnerar BIO_lookup en statisk variabel.
+     * Vi får inte anropa freeaddrinfo/free på den. */
+    return;
+#endif
 #ifdef AI_PASSIVE
 # ifdef AF_UNIX
 #  define _cond bai->bai_family != AF_UNIX
@@ -617,7 +621,40 @@ int BIO_lookup(const char *host, const char *service,
                enum BIO_lookup_type lookup_type,
                int family, int socktype, BIO_ADDRINFO **res)
 {
+#ifdef KLEE
+    /*
+     * Under KLEE kan vi inte göra DNS-lookup (getaddrinfo).
+     * Istället returnerar vi en hårdkodad adress: 127.0.0.1:4433
+     * Detta matchar wolfSSLs echoclient som också använder
+     * en hårdkodad loopback-adress.
+     *
+     * BIO_ADDRINFO är en länkad lista med adresser att prova.
+     * Vi skapar en enda post med IPv4/TCP/loopback.
+     *
+     * static: variablerna lever kvar efter funktionen returnerar
+     * eftersom BIO-lagret behåller pekaren till *res.
+     */
+    static BIO_ADDRINFO ai;           /* adressinfo-post */
+    static struct sockaddr_in sa;     /* IPv4-adress */
+
+    memset(&sa, 0, sizeof(sa));
+    sa.sin_family = AF_INET;
+    sa.sin_port = htons(4433);                /* port 4433 */
+    sa.sin_addr.s_addr = htonl(INADDR_LOOPBACK); /* 127.0.0.1 */
+
+    memset(&ai, 0, sizeof(ai));
+    ai.bai_family = AF_INET;                  /* IPv4 */
+    ai.bai_socktype = SOCK_STREAM;            /* TCP */
+    ai.bai_protocol = IPPROTO_TCP;            /* TCP-protokoll */
+    ai.bai_addr = (struct sockaddr *)&sa;     /* pekare till adressen */
+    ai.bai_addrlen = sizeof(sa);              /* storlek */
+    ai.bai_next = NULL;                       /* ingen fler adresser */
+
+    *res = &ai;    /* returnera pekare till vår post */
+    return 1;      /* 1 = lyckat */
+#else
     return BIO_lookup_ex(host, service, lookup_type, family, socktype, 0, res);
+#endif
 }
 
 /*-

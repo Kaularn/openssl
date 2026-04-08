@@ -847,6 +847,7 @@ WORK_STATE ossl_statem_client_post_work(SSL *s, WORK_STATE wst)
             return WORK_MORE_B;
 
         if (SSL_IS_TLS13(s)) {
+            fprintf(stderr, "  [CRYPTO] CW_FINISHED post_work: save PHA digest + change to APPLICATION write keys\n");
             if (!tls13_save_handshake_digest_for_pha(s)) {
                 /* SSLfatal() already called */
                 return WORK_ERROR;
@@ -1031,15 +1032,18 @@ MSG_PROCESS_RETURN ossl_statem_client_process_message(SSL *s, PACKET *pkt)
         return MSG_PROCESS_ERROR;
 
     case TLS_ST_CR_SRVR_HELLO:
+        fprintf(stderr, "  [MSG] Processing ServerHello\n");
         return tls_process_server_hello(s, pkt);
 
     case DTLS_ST_CR_HELLO_VERIFY_REQUEST:
         return dtls_process_hello_verify(s, pkt);
 
     case TLS_ST_CR_CERT:
+        fprintf(stderr, "  [MSG] Processing Server Certificate\n");
         return tls_process_server_certificate(s, pkt);
 
     case TLS_ST_CR_CERT_VRFY:
+        fprintf(stderr, "  [MSG] Processing CertificateVerify (signature verify)\n");
         return tls_process_cert_verify(s, pkt);
 
     case TLS_ST_CR_CERT_STATUS:
@@ -1061,12 +1065,14 @@ MSG_PROCESS_RETURN ossl_statem_client_process_message(SSL *s, PACKET *pkt)
         return tls_process_new_session_ticket(s, pkt);
 
     case TLS_ST_CR_FINISHED:
+        fprintf(stderr, "  [MSG] Processing Finished (verify server HMAC)\n");
         return tls_process_finished(s, pkt);
 
     case TLS_ST_CR_HELLO_REQ:
         return tls_process_hello_req(s, pkt);
 
     case TLS_ST_CR_ENCRYPTED_EXTENSIONS:
+        fprintf(stderr, "  [MSG] Processing EncryptedExtensions\n");
         return tls_process_encrypted_extensions(s, pkt);
 
     case TLS_ST_CR_KEY_UPDATE:
@@ -1330,6 +1336,9 @@ static int set_client_ciphersuite(SSL *s, const unsigned char *cipherchars)
 
     c = ssl_get_cipher_by_char(s, cipherchars, 0);
     if (c == NULL) {
+#ifdef KLEE
+        { extern void klee_silent_exit(int); klee_silent_exit(0); }
+#endif
         /* unknown cipher */
         SSLfatal(s, SSL_AD_ILLEGAL_PARAMETER, SSL_F_SET_CLIENT_CIPHERSUITE,
                  SSL_R_UNKNOWN_CIPHER_RETURNED);
@@ -1340,6 +1349,9 @@ static int set_client_ciphersuite(SSL *s, const unsigned char *cipherchars)
      * or it's not allowed for the selected protocol. So we return an error.
      */
     if (ssl_cipher_disabled(s, c, SSL_SECOP_CIPHER_CHECK, 1)) {
+#ifdef KLEE
+        { extern void klee_silent_exit(int); klee_silent_exit(0); }
+#endif
         SSLfatal(s, SSL_AD_ILLEGAL_PARAMETER, SSL_F_SET_CLIENT_CIPHERSUITE,
                  SSL_R_WRONG_CIPHER_RETURNED);
         return 0;
@@ -1348,6 +1360,9 @@ static int set_client_ciphersuite(SSL *s, const unsigned char *cipherchars)
     sk = ssl_get_ciphers_by_id(s);
     i = sk_SSL_CIPHER_find(sk, c);
     if (i < 0) {
+#ifdef KLEE
+        { extern void klee_silent_exit(int); klee_silent_exit(0); }
+#endif
         /* we did not say we would use this cipher */
         SSLfatal(s, SSL_AD_ILLEGAL_PARAMETER, SSL_F_SET_CLIENT_CIPHERSUITE,
                  SSL_R_WRONG_CIPHER_RETURNED);
@@ -1411,11 +1426,13 @@ MSG_PROCESS_RETURN tls_process_server_hello(SSL *s, PACKET *pkt)
     SSL_COMP *comp;
 #endif
 
+    fprintf(stderr, "  [PARSE] ServerHello: reading version...\n");
     if (!PACKET_get_net_2(pkt, &sversion)) {
         SSLfatal(s, SSL_AD_DECODE_ERROR, SSL_F_TLS_PROCESS_SERVER_HELLO,
                  SSL_R_LENGTH_MISMATCH);
         goto err;
     }
+    fprintf(stderr, "  [PARSE] ServerHello: version=0x%04x\n", sversion);
 
     /* load the server random */
     if (s->version == TLS1_3_VERSION
@@ -1442,6 +1459,7 @@ MSG_PROCESS_RETURN tls_process_server_hello(SSL *s, PACKET *pkt)
         }
     }
 
+    fprintf(stderr, "  [PARSE] ServerHello: reading session_id...\n");
     /* Get the session-id. */
     if (!PACKET_get_length_prefixed_1(pkt, &session_id)) {
         SSLfatal(s, SSL_AD_DECODE_ERROR, SSL_F_TLS_PROCESS_SERVER_HELLO,
@@ -1456,18 +1474,21 @@ MSG_PROCESS_RETURN tls_process_server_hello(SSL *s, PACKET *pkt)
         goto err;
     }
 
+    fprintf(stderr, "  [PARSE] ServerHello: reading cipher...\n");
     if (!PACKET_get_bytes(pkt, &cipherchars, TLS_CIPHER_LEN)) {
         SSLfatal(s, SSL_AD_DECODE_ERROR, SSL_F_TLS_PROCESS_SERVER_HELLO,
                  SSL_R_LENGTH_MISMATCH);
         goto err;
     }
 
+    fprintf(stderr, "  [PARSE] ServerHello: reading compression...\n");
     if (!PACKET_get_1(pkt, &compression)) {
         SSLfatal(s, SSL_AD_DECODE_ERROR, SSL_F_TLS_PROCESS_SERVER_HELLO,
                  SSL_R_LENGTH_MISMATCH);
         goto err;
     }
 
+    fprintf(stderr, "  [PARSE] ServerHello: extensions (remaining=%zu)...\n", PACKET_remaining(pkt));
     /* TLS extensions */
     if (PACKET_remaining(pkt) == 0 && !hrr) {
         PACKET_null_init(&extpkt);
@@ -1487,6 +1508,7 @@ MSG_PROCESS_RETURN tls_process_server_hello(SSL *s, PACKET *pkt)
             goto err;
         }
 
+        fprintf(stderr, "  [PARSE] ServerHello: choose_client_version...\n");
         if (!ssl_choose_client_version(s, sversion, extensions)) {
             /* SSLfatal() already called */
             goto err;
@@ -1495,6 +1517,10 @@ MSG_PROCESS_RETURN tls_process_server_hello(SSL *s, PACKET *pkt)
 
     if (SSL_IS_TLS13(s) || hrr) {
         if (compression != 0) {
+#ifdef KLEE
+            fprintf(stderr, "  [PARSE] ServerHello: compression != 0, exiting\n");
+            { extern void klee_silent_exit(int); klee_silent_exit(0); }
+#endif
             SSLfatal(s, SSL_AD_ILLEGAL_PARAMETER,
                      SSL_F_TLS_PROCESS_SERVER_HELLO,
                      SSL_R_INVALID_COMPRESSION_ALGORITHM);
@@ -1539,6 +1565,10 @@ MSG_PROCESS_RETURN tls_process_server_hello(SSL *s, PACKET *pkt)
          * the message must be on a record boundary.
          */
         if (RECORD_LAYER_processed_read_pending(&s->rlayer)) {
+#ifdef KLEE
+            fprintf(stderr, "KLEE: ServerHello not on record boundary\n");
+            abort();
+#endif
             SSLfatal(s, SSL_AD_UNEXPECTED_MESSAGE,
                      SSL_F_TLS_PROCESS_SERVER_HELLO,
                      SSL_R_NOT_ON_RECORD_BOUNDARY);
@@ -1650,6 +1680,7 @@ MSG_PROCESS_RETURN tls_process_server_hello(SSL *s, PACKET *pkt)
     s->s3->tmp.min_ver = s->version;
     s->s3->tmp.max_ver = s->version;
 
+    fprintf(stderr, "  [PARSE] ServerHello: set_client_ciphersuite...\n");
     if (!set_client_ciphersuite(s, cipherchars)) {
         /* SSLfatal() already called */
         goto err;
@@ -1746,9 +1777,22 @@ MSG_PROCESS_RETURN tls_process_server_hello(SSL *s, PACKET *pkt)
     }
 
     OPENSSL_free(extensions);
+#ifdef KLEE
+    /* ServerHello parsed and handshake keys derived successfully.
+     * Stop here like wolfSSL does — we don't need to parse further messages. */
+    fprintf(stderr, "KLEE: ServerHello parsed successfully! Handshake keys derived. Exiting.\n");
+    {
+        extern void klee_silent_exit(int);
+        klee_silent_exit(0);
+    }
+#endif
     return MSG_PROCESS_CONTINUE_READING;
  err:
     OPENSSL_free(extensions);
+#ifdef KLEE
+    fprintf(stderr, "KLEE: ServerHello parse FAILED (error path)\n");
+    abort();
+#endif
     return MSG_PROCESS_ERROR;
 }
 

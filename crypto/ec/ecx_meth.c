@@ -686,12 +686,28 @@ static int pkey_ecx_derive25519(EVP_PKEY_CTX *ctx, unsigned char *key,
 {
     const unsigned char *privkey, *pubkey;
 
+#ifdef KLEE
+    /* KLEE can't solve X25519 math symbolically.
+     * Return a symbolic shared secret instead. */
+    *keylen = X25519_KEYLEN;
+    if (key != NULL) {
+        extern void klee_make_symbolic(void *, size_t, const char *);
+        extern void klee_warning(const char *);
+        klee_warning("ECDH X25519: returning symbolic shared secret");
+        void *sym = malloc(X25519_KEYLEN);
+        klee_make_symbolic(sym, X25519_KEYLEN, "dhsecret");
+        memcpy(key, sym, X25519_KEYLEN);
+        free(sym);
+    }
+    return 1;
+#else
     if (!validate_ecx_derive(ctx, key, keylen, &privkey, &pubkey)
-            || (key != NULL
-                && X25519(key, privkey, pubkey) == 0))
+        || (key != NULL
+            && X25519(key, privkey, pubkey) == 0))
         return 0;
     *keylen = X25519_KEYLEN;
     return 1;
+#endif
 }
 
 static int pkey_ecx_derive448(EVP_PKEY_CTX *ctx, unsigned char *key,

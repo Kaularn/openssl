@@ -320,6 +320,9 @@ static int conn_read(BIO *b, char *out, int outl)
 
     if (out != NULL) {
         clear_socket_error();
+#ifdef KLEE
+        fprintf(stderr, "DEBUG: conn_read outl=%d\n", outl);
+#endif
         ret = readsocket(b->num, out, outl);
         BIO_clear_retry_flags(b);
         if (ret <= 0) {

@@ -1046,7 +1046,8 @@ WORK_STATE tls_finish_handshake(SSL *s, WORK_STATE wst, int clearbufs, int stop)
             || BIO_dgram_is_sctp(SSL_get_wbio(s))
 #endif
             ) {
-            /*
+            
+                /*
              * We don't do this in DTLS over UDP because we may still need the init_buf
              * in case there are any unexpected retransmits
              */
@@ -1150,6 +1151,10 @@ int tls_get_message_header(SSL *s, int *mt)
 {
     /* s->init_num < SSL3_HM_HEADER_LENGTH */
     int skip_message, i, recvd_type;
+#ifdef KLEE
+    fprintf(stderr, "DEBUG: tls_get_message_header hand_state=%d init_num=%d\n",
+            s->statem.hand_state, s->init_num);
+#endif
     unsigned char *p;
     size_t l, readbytes;
 
@@ -1198,8 +1203,13 @@ int tls_get_message_header(SSL *s, int *mt)
                          SSL_R_CCS_RECEIVED_EARLY);
                 return 0;
             }
-            s->init_num += readbytes;
-        }
+                s->init_num += readbytes;
+            }
+#ifdef KLEE
+            if (s->statem.hand_state == TLS_ST_CW_CLNT_HELLO) {
+                p[0] = SSL3_MT_SERVER_HELLO;
+            }
+#endif
 
         skip_message = 0;
         if (!s->server)
@@ -1213,8 +1223,14 @@ int tls_get_message_header(SSL *s, int *mt)
                  */
                 if (p[1] == 0 && p[2] == 0 && p[3] == 0) {
                     s->init_num = 0;
+#ifdef KLEE
+                    /* Avbryt sökvägen – HelloRequest är inte intressant */
+                    SSLfatal(s, SSL_AD_UNEXPECTED_MESSAGE,
+                             SSL_F_TLS_GET_MESSAGE_HEADER,
+                             SSL_R_UNEXPECTED_MESSAGE);
+                    return 0;
+#endif
                     skip_message = 1;
-
                     if (s->msg_callback)
                         s->msg_callback(0, s->version, SSL3_RT_HANDSHAKE,
                                         p, SSL3_HM_HEADER_LENGTH, s,
@@ -1224,9 +1240,22 @@ int tls_get_message_header(SSL *s, int *mt)
     /* s->init_num == SSL3_HM_HEADER_LENGTH */
 
     *mt = *p;
+#ifdef KLEE
+    extern void klee_assume(int);
+    /* Tvinga ServerHello (type 2) som första meddelande */
+    if (s->statem.hand_state == TLS_ST_CW_CLNT_HELLO) {
+        klee_assume(*mt == SSL3_MT_SERVER_HELLO);
+    }
+    fprintf(stderr, "DEBUG: message type mt=%d\n", *mt);
+#endif
     s->s3->tmp.message_type = *(p++);
 
     if (RECORD_LAYER_is_sslv2_record(&s->rlayer)) {
+#ifdef KLEE
+        /* SSLv2 records should never happen in TLS 1.3 */
+        extern void klee_silent_exit(int);
+        klee_silent_exit(0);
+#endif
         /*
          * Only happens with SSLv3+ in an SSLv2 backward compatible
          * ClientHello
@@ -1242,6 +1271,11 @@ int tls_get_message_header(SSL *s, int *mt)
         s->init_num = SSL3_HM_HEADER_LENGTH;
     } else {
         n2l3(p, l);
+#ifdef KLEE
+        /* Message length is symbolic from the record body.
+         * Constrain to a reasonable range for ServerHello. */
+        fprintf(stderr, "DEBUG: message_size=%lu (symbolic from network)\n", l);
+#endif
         /* BUF_MEM_grow takes an 'int' parameter */
         if (l > (INT_MAX - SSL3_HM_HEADER_LENGTH)) {
             SSLfatal(s, SSL_AD_ILLEGAL_PARAMETER, SSL_F_TLS_GET_MESSAGE_HEADER,
@@ -1249,6 +1283,9 @@ int tls_get_message_header(SSL *s, int *mt)
             return 0;
         }
         s->s3->tmp.message_size = l;
+#ifdef KLEE
+        fprintf(stderr, "DEBUG: message_size=%lu mt=%d\n", l, *mt);
+#endif
 
         s->init_msg = s->init_buf->data + SSL3_HM_HEADER_LENGTH;
         s->init_num = 0;
@@ -1262,6 +1299,10 @@ int tls_get_message_body(SSL *s, size_t *len)
     size_t n, readbytes;
     unsigned char *p;
     int i;
+#ifdef KLEE
+    fprintf(stderr, "DEBUG: tls_get_message_body message_size=%lu init_num=%d\n",
+            s->s3->tmp.message_size, s->init_num);
+#endif
 
     if (s->s3->tmp.message_type == SSL3_MT_CHANGE_CIPHER_SPEC) {
         /* We've already read everything in */
@@ -1902,6 +1943,10 @@ int ssl_choose_client_version(SSL *s, int version, RAW_EXTENSION *extensions)
     origv = s->version;
     s->version = version;
 
+#ifdef KLEE
+    fprintf(stderr, "DEBUG: ssl_choose_client_version version=0x%04x\n", version);
+#endif
+
     /* This will overwrite s->version if the extension is present */
     if (!tls_parse_extension(s, TLSEXT_IDX_supported_versions,
                              SSL_EXT_TLS1_2_SERVER_HELLO
@@ -1913,6 +1958,10 @@ int ssl_choose_client_version(SSL *s, int version, RAW_EXTENSION *extensions)
 
     if (s->hello_retry_request != SSL_HRR_NONE
             && s->version != TLS1_3_VERSION) {
+#ifdef KLEE
+        extern void klee_silent_exit(int);
+        klee_silent_exit(0); /* HRR but not TLS 1.3 — not interesting */
+#endif
         s->version = origv;
         SSLfatal(s, SSL_AD_PROTOCOL_VERSION, SSL_F_SSL_CHOOSE_CLIENT_VERSION,
                  SSL_R_WRONG_SSL_VERSION);
@@ -1968,6 +2017,13 @@ int ssl_choose_client_version(SSL *s, int version, RAW_EXTENSION *extensions)
     if ((s->mode & SSL_MODE_SEND_FALLBACK_SCSV) == 0)
         real_max = ver_max;
 
+#ifdef KLEE
+    /* We only care about TLS 1.3 — exit silently on any downgrade */
+    if (s->version != TLS1_3_VERSION) {
+        extern void klee_silent_exit(int);
+        klee_silent_exit(0);
+    }
+#endif
     /* Check for downgrades */
     if (s->version == TLS1_2_VERSION && real_max > s->version) {
         if (memcmp(tls12downgrade,
@@ -1999,6 +2055,14 @@ int ssl_choose_client_version(SSL *s, int version, RAW_EXTENSION *extensions)
         if (vent->cmeth == NULL || s->version != vent->version)
             continue;
 
+#ifdef KLEE
+        /* We only care about TLS 1.3 — exit on downgrade */
+        if (s->version != TLS1_3_VERSION) {
+            extern void klee_silent_exit(int);
+            fprintf(stderr, "DEBUG: KLEE downgrade detected version=0x%04x, exiting\n", s->version);
+            klee_silent_exit(0);
+        }
+#endif
         s->method = vent->cmeth();
         return 1;
     }

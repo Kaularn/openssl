@@ -966,11 +966,14 @@ static int ssl_cipher_process_rulestr(const char *rule_str,
     uint32_t cipher_id = 0;
     char ch;
 
+    fprintf(stderr, "DEBUG: ssl_cipher_process_rulestr entered with: %s\n", rule_str ? rule_str : "(null)");
+
     retval = 1;
     l = rule_str;
+    fprintf(stderr, "DEBUG: entering loop\n");
     for ( ; ; ) {
         ch = *l;
-
+        fprintf(stderr, "DEBUG: loop ch=%c (%d)\n", ch, ch);
         if (ch == '\0')
             break;              /* done */
         if (ch == '-') {
@@ -1006,6 +1009,7 @@ static int ssl_cipher_process_rulestr(const char *rule_str,
             buf = l;
             buflen = 0;
 #ifndef CHARSET_EBCDIC
+            fprintf(stderr, "DEBUG: inner loop start ch=%c\n", ch);
             while (((ch >= 'A') && (ch <= 'Z')) ||
                    ((ch >= '0') && (ch <= '9')) ||
                    ((ch >= 'a') && (ch <= 'z')) ||
@@ -1053,9 +1057,10 @@ static int ssl_cipher_process_rulestr(const char *rule_str,
              * sufficient, we have to strncmp() anyway. (We cannot
              * use strcmp(), because buf is not '\0' terminated.)
              */
-            j = found = 0;
-            cipher_id = 0;
-            while (ca_list[j]) {
+                    j = found = 0;
+        cipher_id = 0;
+        fprintf(stderr, "DEBUG: searching for cipher buf=%.*s buflen=%d ca_list=%p\n", buflen, buf, buflen, (void*)ca_list);
+        while (ca_list[j]) {
                 if (strncmp(buf, ca_list[j]->name, buflen) == 0
                     && (ca_list[j]->name[buflen] == '\0')) {
                     found = 1;

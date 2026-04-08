@@ -295,6 +295,49 @@ static info_cb get_callback(SSL *s)
  *   1: Success
  * <=0: NBIO or error
  */
+static const char *handshake_state_name(OSSL_HANDSHAKE_STATE s) {
+    switch (s) {
+    case TLS_ST_BEFORE:              return "BEFORE";
+    case TLS_ST_OK:                  return "OK";
+    case TLS_ST_CW_CLNT_HELLO:       return "CW_CLIENT_HELLO";
+    case TLS_ST_CR_SRVR_HELLO:       return "CR_SERVER_HELLO";
+    case TLS_ST_CR_CERT:             return "CR_CERT";
+    case TLS_ST_CR_CERT_VRFY:        return "CR_CERT_VERIFY";
+    case TLS_ST_CR_FINISHED:         return "CR_FINISHED";
+    case TLS_ST_CW_CERT:             return "CW_CERT";
+    case TLS_ST_CW_CERT_VRFY:        return "CW_CERT_VERIFY";
+    case TLS_ST_CW_FINISHED:         return "CW_FINISHED";
+    case TLS_ST_CW_CHANGE:           return "CW_CHANGE_CIPHER_SPEC";
+    case TLS_ST_CW_KEY_EXCH:         return "CW_KEY_EXCHANGE";
+    case TLS_ST_CR_KEY_EXCH:         return "CR_KEY_EXCHANGE";
+    case TLS_ST_CR_CHANGE:           return "CR_CHANGE_CIPHER_SPEC";
+    case TLS_ST_CR_SESSION_TICKET:    return "CR_SESSION_TICKET";
+    case TLS_ST_CR_CERT_STATUS:      return "CR_CERT_STATUS";
+    case TLS_ST_CR_CERT_REQ:         return "CR_CERT_REQUEST";
+    case TLS_ST_CR_SRVR_DONE:        return "CR_SERVER_DONE";
+    case TLS_ST_CR_ENCRYPTED_EXTENSIONS: return "CR_ENCRYPTED_EXTENSIONS";
+    case TLS_ST_CR_KEY_UPDATE:       return "CR_KEY_UPDATE";
+    case TLS_ST_CW_KEY_UPDATE:       return "CW_KEY_UPDATE";
+    case TLS_ST_CW_END_OF_EARLY_DATA: return "CW_END_OF_EARLY_DATA";
+    case TLS_ST_EARLY_DATA:          return "EARLY_DATA";
+    case TLS_ST_PENDING_EARLY_DATA_END: return "PENDING_EARLY_DATA_END";
+    case TLS_ST_CR_HELLO_REQ:        return "CR_HELLO_REQUEST";
+    case TLS_ST_SW_HELLO_REQ:        return "SW_HELLO_REQUEST";
+    default:                         return "UNKNOWN_STATE";
+    }
+}
+
+static const char *msg_flow_name(MSG_FLOW_STATE s) {
+    switch (s) {
+    case MSG_FLOW_UNINITED:  return "UNINITED";
+    case MSG_FLOW_ERROR:     return "ERROR";
+    case MSG_FLOW_READING:   return "READING";
+    case MSG_FLOW_WRITING:   return "WRITING";
+    case MSG_FLOW_FINISHED:  return "FINISHED";
+    default:                 return "UNKNOWN";
+    }
+}
+
 static int state_machine(SSL *s, int server)
 {
     BUF_MEM *buf = NULL;
@@ -302,6 +345,12 @@ static int state_machine(SSL *s, int server)
     OSSL_STATEM *st = &s->statem;
     int ret = -1;
     int ssret;
+
+    fprintf(stderr, "\nSTATE_MACHINE ENTER\n");
+    fprintf(stderr, "  role=%s  flow=%s  handshake=%s\n",
+            server ? "SERVER" : "CLIENT",
+            msg_flow_name(st->state),
+            handshake_state_name(st->hand_state));
 
     if (st->state == MSG_FLOW_ERROR) {
         /* Shouldn't have been called if we're already in the error state */
@@ -430,9 +479,13 @@ static int state_machine(SSL *s, int server)
     }
 
     while (st->state != MSG_FLOW_FINISHED) {
+        fprintf(stderr, "  [LOOP] flow=%s  handshake=%s\n",
+                msg_flow_name(st->state),
+                handshake_state_name(st->hand_state));
         if (st->state == MSG_FLOW_READING) {
             ssret = read_state_machine(s);
             if (ssret == SUB_STATE_FINISHED) {
+                fprintf(stderr, "  [FLOW] READING -> WRITING\n");
                 st->state = MSG_FLOW_WRITING;
                 init_write_state_machine(s);
             } else {
@@ -442,9 +495,11 @@ static int state_machine(SSL *s, int server)
         } else if (st->state == MSG_FLOW_WRITING) {
             ssret = write_state_machine(s);
             if (ssret == SUB_STATE_FINISHED) {
+                fprintf(stderr, "  [FLOW] WRITING -> READING\n");
                 st->state = MSG_FLOW_READING;
                 init_read_state_machine(s);
             } else if (ssret == SUB_STATE_END_HANDSHAKE) {
+                fprintf(stderr, "  [FLOW] WRITING -> FINISHED (handshake done!)\n");
                 st->state = MSG_FLOW_FINISHED;
             } else {
                 /* NBIO or error */
@@ -595,8 +650,15 @@ static SUB_STATE_RETURN read_state_machine(SSL *s)
              * Validate that we are allowed to move to the new state and move
              * to that state if so
              */
-            if (!transition(s, mt))
+
+
+            if (!transition(s, mt)) {
+                fprintf(stderr, "  [READ] transition REJECTED mt=%d in state %s\n",
+                        mt, handshake_state_name(st->hand_state));
                 return SUB_STATE_ERROR;
+            }
+            fprintf(stderr, "  [READ] transitioned to %s  (msg_type=%d)\n",
+                    handshake_state_name(st->hand_state), mt);
 
             if (s->s3->tmp.message_size > max_message_size(s)) {
                 SSLfatal(s, SSL_AD_ILLEGAL_PARAMETER, SSL_F_READ_STATE_MACHINE,
@@ -790,13 +852,30 @@ static SUB_STATE_RETURN write_state_machine(SSL *s)
                 else
                     cb(s, SSL_CB_CONNECT_LOOP, 1);
             }
+
+
+
+
+
+
+
+
+
+
+
+
+
             switch (transition(s)) {
             case WRITE_TRAN_CONTINUE:
+                fprintf(stderr, "  [WRITE] TRAN_CONTINUE in state %s\n",
+                        handshake_state_name(st->hand_state));
                 st->write_state = WRITE_STATE_PRE_WORK;
                 st->write_state_work = WORK_MORE_A;
                 break;
 
             case WRITE_TRAN_FINISHED:
+                fprintf(stderr, "  [WRITE] TRAN_FINISHED in state %s\n",
+                        handshake_state_name(st->hand_state));
                 return SUB_STATE_FINISHED;
                 break;
 
