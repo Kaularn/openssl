@@ -489,6 +489,10 @@ static int state_machine(SSL *s, int server)
                 st->state = MSG_FLOW_WRITING;
                 init_write_state_machine(s);
             } else {
+#ifdef KLEE
+                fprintf(stderr, "KLEE: read_state_machine returned error/nbio, silent exit\n");
+                { extern void klee_silent_exit(int); klee_silent_exit(0); }
+#endif
                 /* NBIO or error */
                 goto end;
             }
@@ -622,6 +626,10 @@ static SUB_STATE_RETURN read_state_machine(SSL *s)
     }
 
     while (1) {
+#ifdef KLEE
+        fprintf(stderr, "  [SM] read_state_machine loop: read_state=%d hand_state=%d\n",
+                        st->read_state, st->hand_state);
+#endif
         switch (st->read_state) {
         case READ_STATE_HEADER:
             /* Get the state the peer wants to move to */
@@ -635,6 +643,10 @@ static SUB_STATE_RETURN read_state_machine(SSL *s)
             }
 
             if (ret == 0) {
+#ifdef KLEE
+                fprintf(stderr, "KLEE: tls_get_message_header failed, silent exit\n");
+                { extern void klee_silent_exit(int); klee_silent_exit(0); }
+#endif
                 /* Could be non-blocking IO */
                 return SUB_STATE_ERROR;
             }
@@ -684,6 +696,11 @@ static SUB_STATE_RETURN read_state_machine(SSL *s)
                 /* We already got this above for DTLS */
                 ret = tls_get_message_body(s, &len);
                 if (ret == 0) {
+#ifdef KLEE
+                    fprintf(stderr, "KLEE: tls_get_message_body failed, silent exit\n");
+                    extern void klee_silent_exit(int);
+                    klee_silent_exit(0);
+#endif
                     /* Could be non-blocking IO */
                     return SUB_STATE_ERROR;
                 }
@@ -696,6 +713,16 @@ static SUB_STATE_RETURN read_state_machine(SSL *s)
                 return SUB_STATE_ERROR;
             }
             ret = process_message(s, &pkt);
+
+#ifdef KLEE
+            /* After processing ServerHello, stop — do not read more messages.
+             * Same strategy as wolfSSL's abort() after DoTls13ServerHello. */
+            {
+                extern void klee_silent_exit(int);
+                fprintf(stderr, "KLEE: message processed, exiting state machine\n");
+                klee_silent_exit(0);
+            }
+#endif
 
             /* Discard the packet data */
             s->init_num = 0;

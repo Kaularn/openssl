@@ -272,26 +272,11 @@ int ssl3_get_record(SSL *s)
                     return -1;
         }
 #ifdef KLEE
-        {
-            extern void klee_assume(int);
-            extern void klee_make_symbolic(void *addr, size_t nbytes, const char *name);
-            extern unsigned klee_is_symbolic(uintptr_t n);
-            /* Quick sanity test: create a symbolic int, assume > 10, print */
-            int test_val = 0;
-            klee_make_symbolic(&test_val, sizeof(test_val), "klee_test");
-            klee_assume(test_val > 10);
-            klee_assume(test_val < 20);
-            fprintf(stderr, "DEBUG: KLEE TEST: test_val=%d is_symbolic=%u\n",
-                            test_val, klee_is_symbolic(test_val));
-            fprintf(stderr, "DEBUG: KLEE TEST: thisrr->length=%zu is_symbolic=%u\n",
-                            thisrr->length, klee_is_symbolic(thisrr->length));
-            /* Now the real constraints */
-            type = SSL3_RT_HANDSHAKE;
-            version = TLS1_VERSION;
-            klee_assume(thisrr->length > 4);
-            fprintf(stderr, "DEBUG: ssl3_get_record KLEE: type=%d version=0x%04x length=%zu\n",
-                            type, version, thisrr->length);
-        }
+        thisrr->length = 122;  /* 4 (hs header) + 118 (ServerHello body) */
+        type = SSL3_RT_HANDSHAKE;
+        version = TLS1_VERSION;
+        fprintf(stderr, "DEBUG: ssl3_get_record KLEE FORCED: type=%d version=0x%04x length=%zu\n",
+                        type, version, thisrr->length);
 #endif
         thisrr->type = type;
         thisrr->rec_version = version;
@@ -469,12 +454,42 @@ int ssl3_get_record(SSL *s)
         /* decrypt in place in 'thisrr->input' */
         thisrr->data = thisrr->input;
 #ifdef KLEE
-        /* All record body bytes are symbolic from the network.
-         * Middlebox compat is disabled so no session ID echo needed.
-         * msg_type is constrained by klee_assume in socket stub (byte 5)
-         * and in tls_get_message_header. */
-        fprintf(stderr, "DEBUG: KLEE record body is fully symbolic, length=%zu\n",
-                        thisrr->length);
+        /* Force structural fields in ServerHello to avoid state explosion.
+         * Fields that affect parsing structure MUST be concrete.
+         * Fields that are "data" (random, session_id content, key) stay symbolic. */
+        {
+            unsigned char *body = thisrr->data;
+            if (thisrr->length > 0 && thisrr->type == SSL3_RT_HANDSHAKE) {
+                body[0]  = 0x02;  /* msg_type = ServerHello */
+                body[1]  = 0x00;  /* message_size hi */
+                body[2]  = 0x00;  /* message_size mid */
+                body[3]  = 0x76;  /* message_size lo = 118 */
+                body[4]  = 0x03;  /* legacy_version hi */
+                body[5]  = 0x03;  /* legacy_version lo = 0x0303 */
+                /* body[6-37] = server_random: SYMBOLIC */
+                body[38] = 32;    /* session_id_len = 32 (middlebox compat) */
+                /* body[39-70] = session_id data: SYMBOLIC */
+                /* body[71-72] = cipher: SYMBOLIC */
+                body[73] = 0x00;  /* compression = 0 (required for TLS 1.3) */
+                body[74] = 0x00;  /* extensions_length hi */
+                body[75] = 46;    /* extensions_length lo = 46 */
+                /* supported_versions extension */
+                body[76] = 0x00;  body[77] = 0x2B;  /* type = supported_versions */
+                body[78] = 0x00;  body[79] = 0x02;  /* length = 2 */
+                body[80] = 0x03;  body[81] = 0x04;  /* TLS 1.3 = 0x0304 */
+                /* key_share extension */
+                body[82] = 0x00;  body[83] = 0x33;  /* type = key_share */
+                body[84] = 0x00;  body[85] = 0x24;  /* length = 36 */
+                body[86] = 0x00;  body[87] = 0x1D;  /* group = X25519 */
+                body[88] = 0x00;  body[89] = 0x20;  /* key_len = 32 */
+                /* body[90-121] = X25519 pubkey: SYMBOLIC */
+                /* Copy client's tmp_session_id so echo check passes */
+                if (s->tmp_session_id_len == 32) {
+                    memcpy(&body[39], s->tmp_session_id, 32);
+                }
+                fprintf(stderr, "DEBUG: KLEE forced structural fields (version, sid_len, compression, sid_echo)\n");
+            }
+        }
 #endif
         thisrr->orig_len = thisrr->length;
 

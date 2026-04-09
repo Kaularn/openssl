@@ -321,7 +321,7 @@ static int conn_read(BIO *b, char *out, int outl)
     if (out != NULL) {
         clear_socket_error();
 #ifdef KLEE
-        fprintf(stderr, "DEBUG: conn_read outl=%d\n", outl);
+        fprintf(stderr, "DEBUG: conn_read called (outl may be symbolic)\n");
 #endif
         ret = readsocket(b->num, out, outl);
         BIO_clear_retry_flags(b);

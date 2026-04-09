@@ -1337,6 +1337,7 @@ static int set_client_ciphersuite(SSL *s, const unsigned char *cipherchars)
     c = ssl_get_cipher_by_char(s, cipherchars, 0);
     if (c == NULL) {
 #ifdef KLEE
+        fprintf(stderr, "KLEE: unknown cipher, silent exit\n");
         { extern void klee_silent_exit(int); klee_silent_exit(0); }
 #endif
         /* unknown cipher */
@@ -1350,6 +1351,7 @@ static int set_client_ciphersuite(SSL *s, const unsigned char *cipherchars)
      */
     if (ssl_cipher_disabled(s, c, SSL_SECOP_CIPHER_CHECK, 1)) {
 #ifdef KLEE
+        fprintf(stderr, "KLEE: cipher disabled, silent exit\n");
         { extern void klee_silent_exit(int); klee_silent_exit(0); }
 #endif
         SSLfatal(s, SSL_AD_ILLEGAL_PARAMETER, SSL_F_SET_CLIENT_CIPHERSUITE,
@@ -1361,6 +1363,7 @@ static int set_client_ciphersuite(SSL *s, const unsigned char *cipherchars)
     i = sk_SSL_CIPHER_find(sk, c);
     if (i < 0) {
 #ifdef KLEE
+        fprintf(stderr, "KLEE: cipher not in our list, silent exit\n");
         { extern void klee_silent_exit(int); klee_silent_exit(0); }
 #endif
         /* we did not say we would use this cipher */
@@ -1426,7 +1429,12 @@ MSG_PROCESS_RETURN tls_process_server_hello(SSL *s, PACKET *pkt)
     SSL_COMP *comp;
 #endif
 
-    fprintf(stderr, "  [PARSE] ServerHello: reading version...\n");
+    {
+        extern unsigned klee_is_symbolic(uintptr_t n);
+        size_t rem = PACKET_remaining(pkt);
+        fprintf(stderr, "  [PARSE] ServerHello: reading version (pkt remaining is_symbolic=%u)...\n",
+                        klee_is_symbolic(rem));
+    }
     if (!PACKET_get_net_2(pkt, &sversion)) {
         SSLfatal(s, SSL_AD_DECODE_ERROR, SSL_F_TLS_PROCESS_SERVER_HELLO,
                  SSL_R_LENGTH_MISMATCH);

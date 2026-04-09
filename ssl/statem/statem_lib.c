@@ -1253,6 +1253,7 @@ int tls_get_message_header(SSL *s, int *mt)
     if (RECORD_LAYER_is_sslv2_record(&s->rlayer)) {
 #ifdef KLEE
         /* SSLv2 records should never happen in TLS 1.3 */
+        fprintf(stderr, "KLEE: SSLv2 record detected, silent exit\n");
         extern void klee_silent_exit(int);
         klee_silent_exit(0);
 #endif
@@ -1272,9 +1273,10 @@ int tls_get_message_header(SSL *s, int *mt)
     } else {
         n2l3(p, l);
 #ifdef KLEE
-        /* Message length is symbolic from the record body.
-         * Constrain to a reasonable range for ServerHello. */
-        fprintf(stderr, "DEBUG: message_size=%lu (symbolic from network)\n", l);
+        /* Force message length to 118 bytes — matches our forced ServerHello layout.
+         * 2(ver) + 32(random) + 33(sid) + 2(cipher) + 1(comp) + 2(ext_len) + 46(ext) = 118 */
+        l = 118;
+        fprintf(stderr, "DEBUG: KLEE forced message_size to %lu\n", l);
 #endif
         /* BUF_MEM_grow takes an 'int' parameter */
         if (l > (INT_MAX - SSL3_HM_HEADER_LENGTH)) {
@@ -1300,7 +1302,7 @@ int tls_get_message_body(SSL *s, size_t *len)
     unsigned char *p;
     int i;
 #ifdef KLEE
-    fprintf(stderr, "DEBUG: tls_get_message_body message_size=%lu init_num=%d\n",
+    fprintf(stderr, "DEBUG: tls_get_message_body entered message_size=%lu init_num=%d\n",
             s->s3->tmp.message_size, s->init_num);
 #endif
 
@@ -1312,6 +1314,26 @@ int tls_get_message_body(SSL *s, size_t *len)
 
     p = s->init_msg;
     n = s->s3->tmp.message_size - s->init_num;
+#ifdef KLEE
+    /* Like wolfSSL: read all in one go, otherwise silent exit.
+     * This prevents unbounded fragmentation loops. */
+    if (n > 0) {
+        i = s->method->ssl_read_bytes(s, SSL3_RT_HANDSHAKE, NULL,
+                                      &p[s->init_num], n, 0, &readbytes);
+        if (i <= 0) {
+            fprintf(stderr, "KLEE: tls_get_message_body ssl_read_bytes failed, silent exit\n");
+            extern void klee_silent_exit(int);
+            klee_silent_exit(0);
+        }
+        s->init_num += readbytes;
+        n -= readbytes;
+        if (n > 0) {
+            fprintf(stderr, "KLEE: tls_get_message_body partial read, silent exit\n");
+            extern void klee_silent_exit(int);
+            klee_silent_exit(0);
+        }
+    }
+#else
     while (n > 0) {
         i = s->method->ssl_read_bytes(s, SSL3_RT_HANDSHAKE, NULL,
                                       &p[s->init_num], n, 0, &readbytes);
@@ -1323,6 +1345,7 @@ int tls_get_message_body(SSL *s, size_t *len)
         s->init_num += readbytes;
         n -= readbytes;
     }
+#endif
 
     /*
      * If receiving Finished, record MAC of prior handshake messages for
@@ -1959,6 +1982,7 @@ int ssl_choose_client_version(SSL *s, int version, RAW_EXTENSION *extensions)
     if (s->hello_retry_request != SSL_HRR_NONE
             && s->version != TLS1_3_VERSION) {
 #ifdef KLEE
+        fprintf(stderr, "KLEE: HRR but not TLS 1.3, silent exit\n");
         extern void klee_silent_exit(int);
         klee_silent_exit(0); /* HRR but not TLS 1.3 — not interesting */
 #endif
@@ -2020,6 +2044,7 @@ int ssl_choose_client_version(SSL *s, int version, RAW_EXTENSION *extensions)
 #ifdef KLEE
     /* We only care about TLS 1.3 — exit silently on any downgrade */
     if (s->version != TLS1_3_VERSION) {
+        fprintf(stderr, "KLEE: not TLS 1.3 after version select, silent exit\n");
         extern void klee_silent_exit(int);
         klee_silent_exit(0);
     }

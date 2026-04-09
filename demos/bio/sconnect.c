@@ -64,9 +64,8 @@ int main(int argc, char *argv[])
     SSL_CTX_set_ciphersuites(ssl_ctx, "TLS_AES_128_GCM_SHA256");
     /* No cert verification under KLEE */
     SSL_CTX_set_verify(ssl_ctx, SSL_VERIFY_NONE, NULL);
-    /* Disable middlebox compatibility mode — wolfSSL doesn't use it either.
-     * This removes the session ID echo check that would kill every path. */
-    SSL_CTX_clear_options(ssl_ctx, SSL_OP_ENABLE_MIDDLEBOX_COMPAT);
+    // Middlebox compat stays ON — session ID echo check needs our forced sid copy
+    // SSL_CTX_clear_options(ssl_ctx, SSL_OP_ENABLE_MIDDLEBOX_COMPAT);
 #else
     /* Enable trust chain verification */
     SSL_CTX_set_verify(ssl_ctx, SSL_VERIFY_PEER, NULL);
