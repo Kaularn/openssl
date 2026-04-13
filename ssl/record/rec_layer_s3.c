@@ -344,9 +344,9 @@ int ssl3_read_n(SSL *s, size_t n, size_t max, int extend, int clearold,
      * avbryt denna sökväg. Precis som wolfSSL — vi kräver att
      * hela meddelandet läses i ett svep. */
     if (left < n) {
-        fprintf(stderr, "KLEE: partial read (left < n), silent exit\n");
-        extern void klee_silent_exit(int);
-        klee_silent_exit(0);
+        fprintf(stderr, "[REJECT] partial read\n");
+        
+        abort();
     }
 #else
     }

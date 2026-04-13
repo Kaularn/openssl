@@ -1775,6 +1775,7 @@ int tls_parse_stoc_ems(SSL *s, PACKET *pkt, unsigned int context, X509 *x,
 int tls_parse_stoc_supported_versions(SSL *s, PACKET *pkt, unsigned int context,
                                       X509 *x, size_t chainidx)
 {
+    /* fprintf(stderr, "DEBUG: tls_parse_stoc_supported_versions CALLED, pkt remaining=%zu\n", PACKET_remaining(pkt)); */
     unsigned int version;
 
     if (!PACKET_get_net_2(pkt, &version)
@@ -1792,7 +1793,7 @@ int tls_parse_stoc_supported_versions(SSL *s, PACKET *pkt, unsigned int context,
     if (version != TLS1_3_VERSION) {
 #ifdef KLEE
         fprintf(stderr, "  [PARSE] supported_versions: not TLS 1.3 (0x%04x), exiting\n", version);
-        { extern void klee_silent_exit(int); klee_silent_exit(0); }
+        abort();
 #endif
         SSLfatal(s, SSL_AD_ILLEGAL_PARAMETER,
                  SSL_F_TLS_PARSE_STOC_SUPPORTED_VERSIONS,
@@ -1806,7 +1807,6 @@ int tls_parse_stoc_supported_versions(SSL *s, PACKET *pkt, unsigned int context,
 
     /* We just set it here. We validate it in ssl_choose_client_version */
     s->version = version;
-
     return 1;
 }
 
@@ -1873,7 +1873,7 @@ int tls_parse_stoc_key_share(SSL *s, PACKET *pkt, unsigned int context, X509 *x,
 
     if (group_id != s->s3->group_id) {
 #ifdef KLEE
-        fprintf(stderr, "KLEE: key_share group_id mismatch (got %u, expected %u)\n", group_id, s->s3->group_id);
+        fprintf(stderr, "[REJECT] key_share group_id mismatch\n");
         abort();
 #endif
         SSLfatal(s, SSL_AD_ILLEGAL_PARAMETER, SSL_F_TLS_PARSE_STOC_KEY_SHARE,
@@ -1884,7 +1884,7 @@ int tls_parse_stoc_key_share(SSL *s, PACKET *pkt, unsigned int context, X509 *x,
     if (!PACKET_as_length_prefixed_2(pkt, &encoded_pt)
             || PACKET_remaining(&encoded_pt) == 0) {
 #ifdef KLEE
-        fprintf(stderr, "KLEE: key_share length mismatch\n");
+        fprintf(stderr, "[REJECT] key_share length mismatch\n");
         abort();
 #endif
         SSLfatal(s, SSL_AD_DECODE_ERROR, SSL_F_TLS_PARSE_STOC_KEY_SHARE,
@@ -1902,7 +1902,7 @@ int tls_parse_stoc_key_share(SSL *s, PACKET *pkt, unsigned int context, X509 *x,
     if (!EVP_PKEY_set1_tls_encodedpoint(skey, PACKET_data(&encoded_pt),
                                         PACKET_remaining(&encoded_pt))) {
 #ifdef KLEE
-        fprintf(stderr, "KLEE: key_share bad ecpoint\n");
+        fprintf(stderr, "[REJECT] key_share bad ecpoint\n");
         abort();
 #endif
         SSLfatal(s, SSL_AD_ILLEGAL_PARAMETER, SSL_F_TLS_PARSE_STOC_KEY_SHARE,

@@ -64,8 +64,9 @@ int main(int argc, char *argv[])
     SSL_CTX_set_ciphersuites(ssl_ctx, "TLS_AES_128_GCM_SHA256");
     /* No cert verification under KLEE */
     SSL_CTX_set_verify(ssl_ctx, SSL_VERIFY_NONE, NULL);
-    // Middlebox compat stays ON — session ID echo check needs our forced sid copy
-    // SSL_CTX_clear_options(ssl_ctx, SSL_OP_ENABLE_MIDDLEBOX_COMPAT);
+    // Middlebox compat OFF — socket stub handles all structural fields.
+    // No session ID echo needed (wolfSSL doesn't use it either).
+    SSL_CTX_clear_options(ssl_ctx, SSL_OP_ENABLE_MIDDLEBOX_COMPAT);
 #else
     /* Enable trust chain verification */
     SSL_CTX_set_verify(ssl_ctx, SSL_VERIFY_PEER, NULL);

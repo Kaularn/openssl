@@ -464,7 +464,7 @@ static int derive_secret_key_and_iv(SSL *s, int sending, const EVP_MD *md,
 #ifdef KLEE
     /* Stub: pretend AES-GCM engine init succeeded with symbolic keys.
      * We already stubbed tls13_enc() so the engine is never actually used. */
-    fprintf(stderr, "  [CRYPTO] KLEE: AES-GCM CipherInit stubbed (symbolic keys, no real crypto)\n");
+    fprintf(stderr, "[CRYPTO] AES-GCM CipherInit stubbed\n");
     if (0) {
 #else
     if (EVP_CipherInit_ex(ciph_ctx, ciph, NULL, NULL, NULL, sending) <= 0

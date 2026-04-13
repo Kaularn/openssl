@@ -966,14 +966,14 @@ static int ssl_cipher_process_rulestr(const char *rule_str,
     uint32_t cipher_id = 0;
     char ch;
 
-    fprintf(stderr, "DEBUG: ssl_cipher_process_rulestr entered with: %s\n", rule_str ? rule_str : "(null)");
+    /* fprintf(stderr, "DEBUG: ssl_cipher_process_rulestr entered with: %s\n", rule_str ? rule_str : "(null)"); */
 
     retval = 1;
     l = rule_str;
-    fprintf(stderr, "DEBUG: entering loop\n");
+    /* fprintf(stderr, "DEBUG: entering loop\n"); */
     for ( ; ; ) {
         ch = *l;
-        fprintf(stderr, "DEBUG: loop ch=%c (%d)\n", ch, ch);
+        /* fprintf(stderr, "DEBUG: loop ch=%c (%d)\n", ch, ch); */
         if (ch == '\0')
             break;              /* done */
         if (ch == '-') {
@@ -1009,7 +1009,7 @@ static int ssl_cipher_process_rulestr(const char *rule_str,
             buf = l;
             buflen = 0;
 #ifndef CHARSET_EBCDIC
-            fprintf(stderr, "DEBUG: inner loop start ch=%c\n", ch);
+            /* fprintf(stderr, "DEBUG: inner loop start ch=%c\n", ch); */
             while (((ch >= 'A') && (ch <= 'Z')) ||
                    ((ch >= '0') && (ch <= '9')) ||
                    ((ch >= 'a') && (ch <= 'z')) ||
@@ -1059,7 +1059,7 @@ static int ssl_cipher_process_rulestr(const char *rule_str,
              */
                     j = found = 0;
         cipher_id = 0;
-        fprintf(stderr, "DEBUG: searching for cipher buf=%.*s buflen=%d ca_list=%p\n", buflen, buf, buflen, (void*)ca_list);
+        /* fprintf(stderr, "DEBUG: searching for cipher buf=%.*s buflen=%d ca_list=%p\n", buflen, buf, buflen, (void*)ca_list); */
         while (ca_list[j]) {
                 if (strncmp(buf, ca_list[j]->name, buflen) == 0
                     && (ca_list[j]->name[buflen] == '\0')) {

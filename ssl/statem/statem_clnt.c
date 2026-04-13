@@ -1337,8 +1337,8 @@ static int set_client_ciphersuite(SSL *s, const unsigned char *cipherchars)
     c = ssl_get_cipher_by_char(s, cipherchars, 0);
     if (c == NULL) {
 #ifdef KLEE
-        fprintf(stderr, "KLEE: unknown cipher, silent exit\n");
-        { extern void klee_silent_exit(int); klee_silent_exit(0); }
+        fprintf(stderr, "[REJECT] unknown cipher\n");
+        abort();
 #endif
         /* unknown cipher */
         SSLfatal(s, SSL_AD_ILLEGAL_PARAMETER, SSL_F_SET_CLIENT_CIPHERSUITE,
@@ -1351,8 +1351,8 @@ static int set_client_ciphersuite(SSL *s, const unsigned char *cipherchars)
      */
     if (ssl_cipher_disabled(s, c, SSL_SECOP_CIPHER_CHECK, 1)) {
 #ifdef KLEE
-        fprintf(stderr, "KLEE: cipher disabled, silent exit\n");
-        { extern void klee_silent_exit(int); klee_silent_exit(0); }
+        fprintf(stderr, "[REJECT] cipher disabled\n");
+        abort();
 #endif
         SSLfatal(s, SSL_AD_ILLEGAL_PARAMETER, SSL_F_SET_CLIENT_CIPHERSUITE,
                  SSL_R_WRONG_CIPHER_RETURNED);
@@ -1363,8 +1363,8 @@ static int set_client_ciphersuite(SSL *s, const unsigned char *cipherchars)
     i = sk_SSL_CIPHER_find(sk, c);
     if (i < 0) {
 #ifdef KLEE
-        fprintf(stderr, "KLEE: cipher not in our list, silent exit\n");
-        { extern void klee_silent_exit(int); klee_silent_exit(0); }
+        fprintf(stderr, "[REJECT] cipher not in our list\n");
+        abort();
 #endif
         /* we did not say we would use this cipher */
         SSLfatal(s, SSL_AD_ILLEGAL_PARAMETER, SSL_F_SET_CLIENT_CIPHERSUITE,
@@ -1527,14 +1527,14 @@ MSG_PROCESS_RETURN tls_process_server_hello(SSL *s, PACKET *pkt)
         if (compression != 0) {
 #ifdef KLEE
             fprintf(stderr, "  [PARSE] ServerHello: compression != 0, exiting\n");
-            { extern void klee_silent_exit(int); klee_silent_exit(0); }
+            abort();
 #endif
             SSLfatal(s, SSL_AD_ILLEGAL_PARAMETER,
                      SSL_F_TLS_PROCESS_SERVER_HELLO,
                      SSL_R_INVALID_COMPRESSION_ALGORITHM);
             goto err;
         }
-
+#ifndef KLEE
         if (session_id_len != s->tmp_session_id_len
                 || memcmp(PACKET_data(&session_id), s->tmp_session_id,
                           session_id_len) != 0) {
@@ -1542,6 +1542,7 @@ MSG_PROCESS_RETURN tls_process_server_hello(SSL *s, PACKET *pkt)
                      SSL_F_TLS_PROCESS_SERVER_HELLO, SSL_R_INVALID_SESSION_ID);
             goto err;
         }
+#endif
     }
 
     if (hrr) {
@@ -1574,7 +1575,7 @@ MSG_PROCESS_RETURN tls_process_server_hello(SSL *s, PACKET *pkt)
          */
         if (RECORD_LAYER_processed_read_pending(&s->rlayer)) {
 #ifdef KLEE
-            fprintf(stderr, "KLEE: ServerHello not on record boundary\n");
+            fprintf(stderr, "[REJECT] ServerHello not on record boundary\n");
             abort();
 #endif
             SSLfatal(s, SSL_AD_UNEXPECTED_MESSAGE,
@@ -1789,16 +1790,13 @@ MSG_PROCESS_RETURN tls_process_server_hello(SSL *s, PACKET *pkt)
     /* ServerHello parsed and handshake keys derived successfully.
      * Stop here like wolfSSL does — we don't need to parse further messages. */
     fprintf(stderr, "KLEE: ServerHello parsed successfully! Handshake keys derived. Exiting.\n");
-    {
-        extern void klee_silent_exit(int);
-        klee_silent_exit(0);
-    }
+    abort();
 #endif
     return MSG_PROCESS_CONTINUE_READING;
  err:
     OPENSSL_free(extensions);
 #ifdef KLEE
-    fprintf(stderr, "KLEE: ServerHello parse FAILED (error path)\n");
+    fprintf(stderr, "[REJECT] ServerHello parse failed\n");
     abort();
 #endif
     return MSG_PROCESS_ERROR;
@@ -2970,6 +2968,8 @@ static int tls_construct_cke_psk_preamble(SSL *s, WPACKET *pkt)
     } else if (psklen == 0) {
         SSLfatal(s, SSL_AD_HANDSHAKE_FAILURE,
                  SSL_F_TLS_CONSTRUCT_CKE_PSK_PREAMBLE,
+                 SSL_R_PSK_IDENTITY_NOT_FOUND);
+   
                  SSL_R_PSK_IDENTITY_NOT_FOUND);
         goto err;
     }

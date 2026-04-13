@@ -346,11 +346,11 @@ static int state_machine(SSL *s, int server)
     int ret = -1;
     int ssret;
 
-    fprintf(stderr, "\nSTATE_MACHINE ENTER\n");
+    /* fprintf(stderr, "\nSTATE_MACHINE ENTER\n");
     fprintf(stderr, "  role=%s  flow=%s  handshake=%s\n",
             server ? "SERVER" : "CLIENT",
             msg_flow_name(st->state),
-            handshake_state_name(st->hand_state));
+            handshake_state_name(st->hand_state)); */
 
     if (st->state == MSG_FLOW_ERROR) {
         /* Shouldn't have been called if we're already in the error state */
@@ -479,19 +479,19 @@ static int state_machine(SSL *s, int server)
     }
 
     while (st->state != MSG_FLOW_FINISHED) {
-        fprintf(stderr, "  [LOOP] flow=%s  handshake=%s\n",
+        /* fprintf(stderr, "  [LOOP] flow=%s  handshake=%s\n",
                 msg_flow_name(st->state),
-                handshake_state_name(st->hand_state));
+                handshake_state_name(st->hand_state)); */
         if (st->state == MSG_FLOW_READING) {
             ssret = read_state_machine(s);
             if (ssret == SUB_STATE_FINISHED) {
-                fprintf(stderr, "  [FLOW] READING -> WRITING\n");
+                /* fprintf(stderr, "  [FLOW] READING -> WRITING\n"); */
                 st->state = MSG_FLOW_WRITING;
                 init_write_state_machine(s);
             } else {
 #ifdef KLEE
-                fprintf(stderr, "KLEE: read_state_machine returned error/nbio, silent exit\n");
-                { extern void klee_silent_exit(int); klee_silent_exit(0); }
+                fprintf(stderr, "[REJECT] read_state_machine error\n");
+                abort();
 #endif
                 /* NBIO or error */
                 goto end;
@@ -499,11 +499,11 @@ static int state_machine(SSL *s, int server)
         } else if (st->state == MSG_FLOW_WRITING) {
             ssret = write_state_machine(s);
             if (ssret == SUB_STATE_FINISHED) {
-                fprintf(stderr, "  [FLOW] WRITING -> READING\n");
+                /* fprintf(stderr, "  [FLOW] WRITING -> READING\n"); */
                 st->state = MSG_FLOW_READING;
                 init_read_state_machine(s);
             } else if (ssret == SUB_STATE_END_HANDSHAKE) {
-                fprintf(stderr, "  [FLOW] WRITING -> FINISHED (handshake done!)\n");
+                /* fprintf(stderr, "  [FLOW] WRITING -> FINISHED (handshake done!)\n"); */
                 st->state = MSG_FLOW_FINISHED;
             } else {
                 /* NBIO or error */
@@ -627,8 +627,8 @@ static SUB_STATE_RETURN read_state_machine(SSL *s)
 
     while (1) {
 #ifdef KLEE
-        fprintf(stderr, "  [SM] read_state_machine loop: read_state=%d hand_state=%d\n",
-                        st->read_state, st->hand_state);
+        /* fprintf(stderr, "  [SM] read_state_machine loop: read_state=%d hand_state=%d\n",
+                        st->read_state, st->hand_state); */
 #endif
         switch (st->read_state) {
         case READ_STATE_HEADER:
@@ -644,8 +644,8 @@ static SUB_STATE_RETURN read_state_machine(SSL *s)
 
             if (ret == 0) {
 #ifdef KLEE
-                fprintf(stderr, "KLEE: tls_get_message_header failed, silent exit\n");
-                { extern void klee_silent_exit(int); klee_silent_exit(0); }
+                fprintf(stderr, "[REJECT] tls_get_message_header failed\n");
+                abort();
 #endif
                 /* Could be non-blocking IO */
                 return SUB_STATE_ERROR;
@@ -665,12 +665,12 @@ static SUB_STATE_RETURN read_state_machine(SSL *s)
 
 
             if (!transition(s, mt)) {
-                fprintf(stderr, "  [READ] transition REJECTED mt=%d in state %s\n",
-                        mt, handshake_state_name(st->hand_state));
+                /* fprintf(stderr, "  [READ] transition REJECTED mt=%d in state %s\n",
+                        mt, handshake_state_name(st->hand_state)); */
                 return SUB_STATE_ERROR;
             }
-            fprintf(stderr, "  [READ] transitioned to %s  (msg_type=%d)\n",
-                    handshake_state_name(st->hand_state), mt);
+            /* fprintf(stderr, "  [READ] transitioned to %s  (msg_type=%d)\n",
+                    handshake_state_name(st->hand_state), mt); */
 
             if (s->s3->tmp.message_size > max_message_size(s)) {
                 SSLfatal(s, SSL_AD_ILLEGAL_PARAMETER, SSL_F_READ_STATE_MACHINE,
@@ -697,9 +697,9 @@ static SUB_STATE_RETURN read_state_machine(SSL *s)
                 ret = tls_get_message_body(s, &len);
                 if (ret == 0) {
 #ifdef KLEE
-                    fprintf(stderr, "KLEE: tls_get_message_body failed, silent exit\n");
-                    extern void klee_silent_exit(int);
-                    klee_silent_exit(0);
+                    fprintf(stderr, "[REJECT] tls_get_message_body failed\n");
+                    
+                    abort();
 #endif
                     /* Could be non-blocking IO */
                     return SUB_STATE_ERROR;
@@ -718,9 +718,9 @@ static SUB_STATE_RETURN read_state_machine(SSL *s)
             /* After processing ServerHello, stop — do not read more messages.
              * Same strategy as wolfSSL's abort() after DoTls13ServerHello. */
             {
-                extern void klee_silent_exit(int);
-                fprintf(stderr, "KLEE: message processed, exiting state machine\n");
-                klee_silent_exit(0);
+                
+                fprintf(stderr, "[REJECT] message processed, exiting state machine\n");
+                abort();
             }
 #endif
 
@@ -894,15 +894,15 @@ static SUB_STATE_RETURN write_state_machine(SSL *s)
 
             switch (transition(s)) {
             case WRITE_TRAN_CONTINUE:
-                fprintf(stderr, "  [WRITE] TRAN_CONTINUE in state %s\n",
-                        handshake_state_name(st->hand_state));
+                /* fprintf(stderr, "  [WRITE] TRAN_CONTINUE in state %s\n",
+                        handshake_state_name(st->hand_state)); */
                 st->write_state = WRITE_STATE_PRE_WORK;
                 st->write_state_work = WORK_MORE_A;
                 break;
 
             case WRITE_TRAN_FINISHED:
-                fprintf(stderr, "  [WRITE] TRAN_FINISHED in state %s\n",
-                        handshake_state_name(st->hand_state));
+                /* fprintf(stderr, "  [WRITE] TRAN_FINISHED in state %s\n",
+                        handshake_state_name(st->hand_state)); */
                 return SUB_STATE_FINISHED;
                 break;
 

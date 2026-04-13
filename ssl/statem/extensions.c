@@ -593,7 +593,7 @@ int tls_collect_extensions(SSL *s, PACKET *packet, unsigned int context,
             !PACKET_get_length_prefixed_2(&extensions, &extension)) {
 #ifdef KLEE
             fprintf(stderr, "  [PARSE] extensions: bad extension format, exiting\n");
-            { extern void klee_silent_exit(int); klee_silent_exit(0); }
+            abort();
 #endif
             SSLfatal(s, SSL_AD_DECODE_ERROR, SSL_F_TLS_COLLECT_EXTENSIONS,
                      SSL_R_BAD_EXTENSION);
@@ -603,10 +603,10 @@ int tls_collect_extensions(SSL *s, PACKET *packet, unsigned int context,
         /* Only allow supported_versions and key_share in ServerHello.
          * All other extension types cause state explosion. */
         if ((context & (SSL_EXT_TLS1_3_SERVER_HELLO | SSL_EXT_TLS1_2_SERVER_HELLO)) != 0) {
-            extern void klee_silent_exit(int);
+            
             if (type != 0x002B && type != 0x0033) {
-                fprintf(stderr, "  [PARSE] extensions: unwanted type 0x%04x, silent exit\n", type);
-                klee_silent_exit(0);
+                fprintf(stderr, "[REJECT] unwanted extension type 0x%04x\n", type);
+                abort();
             }
             fprintf(stderr, "  [PARSE] extensions: type=0x%04x OK context=0x%04x\n", type, context);
         }
@@ -714,12 +714,14 @@ int tls_parse_extension(SSL *s, TLSEXT_INDEX idx, int context,
                   size_t chainidx) = NULL;
 
     /* Skip if the extension is not present */
-    if (!currext->present)
+    if (!currext->present) {
+    /* fprintf(stderr, "DEBUG: tls_parse_extension idx=%d NOT present\n", (int)idx); */
+    return 1;
+    }
+    if (currext->parsed) {
+        /* fprintf(stderr, "DEBUG: tls_parse_extension idx=%d ALREADY parsed\n", (int)idx); */
         return 1;
-
-    /* Skip if we've already parsed this extension */
-    if (currext->parsed)
-        return 1;
+    }
 
     currext->parsed = 1;
 
@@ -728,8 +730,10 @@ int tls_parse_extension(SSL *s, TLSEXT_INDEX idx, int context,
         const EXTENSION_DEFINITION *extdef = &ext_defs[idx];
 
         /* Check if extension is defined for our protocol. If not, skip */
-        if (!extension_is_relevant(s, extdef->context, context))
+        if (!extension_is_relevant(s, extdef->context, context)) {
+            /* fprintf(stderr, "DEBUG: tls_parse_extension idx=%d NOT relevant extctx=0x%04x thisctx=0x%04x\n", (int)idx, extdef->context, context); */
             return 1;
+            }
 
         parser = s->server ? extdef->parse_ctos : extdef->parse_stoc;
 

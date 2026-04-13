@@ -1152,8 +1152,8 @@ int tls_get_message_header(SSL *s, int *mt)
     /* s->init_num < SSL3_HM_HEADER_LENGTH */
     int skip_message, i, recvd_type;
 #ifdef KLEE
-    fprintf(stderr, "DEBUG: tls_get_message_header hand_state=%d init_num=%d\n",
-            s->statem.hand_state, s->init_num);
+    /* fprintf(stderr, "DEBUG: tls_get_message_header hand_state=%d init_num=%d\n",
+            s->statem.hand_state, s->init_num); */
 #endif
     unsigned char *p;
     size_t l, readbytes;
@@ -1246,16 +1246,16 @@ int tls_get_message_header(SSL *s, int *mt)
     if (s->statem.hand_state == TLS_ST_CW_CLNT_HELLO) {
         klee_assume(*mt == SSL3_MT_SERVER_HELLO);
     }
-    fprintf(stderr, "DEBUG: message type mt=%d\n", *mt);
+    /* fprintf(stderr, "DEBUG: message type mt=%d\n", *mt); */
 #endif
     s->s3->tmp.message_type = *(p++);
 
     if (RECORD_LAYER_is_sslv2_record(&s->rlayer)) {
 #ifdef KLEE
         /* SSLv2 records should never happen in TLS 1.3 */
-        fprintf(stderr, "KLEE: SSLv2 record detected, silent exit\n");
-        extern void klee_silent_exit(int);
-        klee_silent_exit(0);
+        fprintf(stderr, "[REJECT] SSLv2 record detected\n");
+        
+        abort();
 #endif
         /*
          * Only happens with SSLv3+ in an SSLv2 backward compatible
@@ -1276,7 +1276,7 @@ int tls_get_message_header(SSL *s, int *mt)
         /* Force message length to 118 bytes — matches our forced ServerHello layout.
          * 2(ver) + 32(random) + 33(sid) + 2(cipher) + 1(comp) + 2(ext_len) + 46(ext) = 118 */
         l = 118;
-        fprintf(stderr, "DEBUG: KLEE forced message_size to %lu\n", l);
+        /* fprintf(stderr, "DEBUG: KLEE forced message_size to %lu\n", l); */
 #endif
         /* BUF_MEM_grow takes an 'int' parameter */
         if (l > (INT_MAX - SSL3_HM_HEADER_LENGTH)) {
@@ -1286,7 +1286,7 @@ int tls_get_message_header(SSL *s, int *mt)
         }
         s->s3->tmp.message_size = l;
 #ifdef KLEE
-        fprintf(stderr, "DEBUG: message_size=%lu mt=%d\n", l, *mt);
+        /* fprintf(stderr, "DEBUG: message_size=%lu mt=%d\n", l, *mt); */
 #endif
 
         s->init_msg = s->init_buf->data + SSL3_HM_HEADER_LENGTH;
@@ -1302,8 +1302,8 @@ int tls_get_message_body(SSL *s, size_t *len)
     unsigned char *p;
     int i;
 #ifdef KLEE
-    fprintf(stderr, "DEBUG: tls_get_message_body entered message_size=%lu init_num=%d\n",
-            s->s3->tmp.message_size, s->init_num);
+    /* fprintf(stderr, "DEBUG: tls_get_message_body entered message_size=%lu init_num=%d\n",
+            s->s3->tmp.message_size, s->init_num); */
 #endif
 
     if (s->s3->tmp.message_type == SSL3_MT_CHANGE_CIPHER_SPEC) {
@@ -1321,16 +1321,16 @@ int tls_get_message_body(SSL *s, size_t *len)
         i = s->method->ssl_read_bytes(s, SSL3_RT_HANDSHAKE, NULL,
                                       &p[s->init_num], n, 0, &readbytes);
         if (i <= 0) {
-            fprintf(stderr, "KLEE: tls_get_message_body ssl_read_bytes failed, silent exit\n");
-            extern void klee_silent_exit(int);
-            klee_silent_exit(0);
+            fprintf(stderr, "[REJECT] tls_get_message_body read failed\n");
+            
+            abort();
         }
         s->init_num += readbytes;
         n -= readbytes;
         if (n > 0) {
-            fprintf(stderr, "KLEE: tls_get_message_body partial read, silent exit\n");
-            extern void klee_silent_exit(int);
-            klee_silent_exit(0);
+            fprintf(stderr, "[REJECT] tls_get_message_body partial read\n");
+            
+            abort();
         }
     }
 #else
@@ -1967,7 +1967,7 @@ int ssl_choose_client_version(SSL *s, int version, RAW_EXTENSION *extensions)
     s->version = version;
 
 #ifdef KLEE
-    fprintf(stderr, "DEBUG: ssl_choose_client_version version=0x%04x\n", version);
+    /* fprintf(stderr, "DEBUG: ssl_choose_client_version version=0x%04x\n", version); */
 #endif
 
     /* This will overwrite s->version if the extension is present */
@@ -1982,9 +1982,9 @@ int ssl_choose_client_version(SSL *s, int version, RAW_EXTENSION *extensions)
     if (s->hello_retry_request != SSL_HRR_NONE
             && s->version != TLS1_3_VERSION) {
 #ifdef KLEE
-        fprintf(stderr, "KLEE: HRR but not TLS 1.3, silent exit\n");
-        extern void klee_silent_exit(int);
-        klee_silent_exit(0); /* HRR but not TLS 1.3 — not interesting */
+        fprintf(stderr, "[REJECT] HRR but not TLS 1.3\n");
+        
+        abort(); /* HRR but not TLS 1.3 — not interesting */
 #endif
         s->version = origv;
         SSLfatal(s, SSL_AD_PROTOCOL_VERSION, SSL_F_SSL_CHOOSE_CLIENT_VERSION,
@@ -2044,9 +2044,9 @@ int ssl_choose_client_version(SSL *s, int version, RAW_EXTENSION *extensions)
 #ifdef KLEE
     /* We only care about TLS 1.3 — exit silently on any downgrade */
     if (s->version != TLS1_3_VERSION) {
-        fprintf(stderr, "KLEE: not TLS 1.3 after version select, silent exit\n");
-        extern void klee_silent_exit(int);
-        klee_silent_exit(0);
+        fprintf(stderr, "[REJECT] not TLS 1.3 after version select\n");
+        
+        abort();
     }
 #endif
     /* Check for downgrades */
@@ -2083,9 +2083,9 @@ int ssl_choose_client_version(SSL *s, int version, RAW_EXTENSION *extensions)
 #ifdef KLEE
         /* We only care about TLS 1.3 — exit on downgrade */
         if (s->version != TLS1_3_VERSION) {
-            extern void klee_silent_exit(int);
-            fprintf(stderr, "DEBUG: KLEE downgrade detected version=0x%04x, exiting\n", s->version);
-            klee_silent_exit(0);
+            
+            /* fprintf(stderr, "DEBUG: KLEE downgrade detected version=0x%04x, exiting\n", s->version); */
+            abort();
         }
 #endif
         s->method = vent->cmeth();
