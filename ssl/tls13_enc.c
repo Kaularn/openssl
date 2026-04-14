@@ -101,6 +101,9 @@ int tls13_hkdf_expand(SSL *s, const EVP_MD *md, const unsigned char *secret,
         memcpy(out, sym, outlen);
         free(sym);
     }
+    { extern unsigned klee_is_symbolic(uintptr_t);
+      fprintf(stderr, "  [DEBUG] hkdf_expand out[0] is_symbolic=%u\n",
+              klee_is_symbolic(out[0])); }
     EVP_PKEY_CTX_free(pctx);
     return 1;
 #else
@@ -202,6 +205,9 @@ int tls13_generate_secret(SSL *s, const EVP_MD *md,
         memcpy(outsecret, sym, hashlen);
         free(sym);
     }
+    { extern unsigned klee_is_symbolic(uintptr_t);
+      fprintf(stderr, "  [DEBUG] hkdf_extract outsecret[0] is_symbolic=%u\n",
+              klee_is_symbolic(outsecret[0])); }
     return 1;
 #endif
     size_t mdlen, prevsecretlen;
@@ -464,7 +470,10 @@ static int derive_secret_key_and_iv(SSL *s, int sending, const EVP_MD *md,
 #ifdef KLEE
     /* Stub: pretend AES-GCM engine init succeeded with symbolic keys.
      * We already stubbed tls13_enc() so the engine is never actually used. */
-    fprintf(stderr, "[CRYPTO] AES-GCM CipherInit stubbed\n");
+        fprintf(stderr, "[CRYPTO] AES-GCM CipherInit stubbed\n");
+    { extern unsigned klee_is_symbolic(uintptr_t);
+      fprintf(stderr, "  [DEBUG] AES key[0] is_symbolic=%u iv[0] is_symbolic=%u\n",
+              klee_is_symbolic(key[0]), klee_is_symbolic(iv[0])); }
     if (0) {
 #else
     if (EVP_CipherInit_ex(ciph_ctx, ciph, NULL, NULL, NULL, sending) <= 0
